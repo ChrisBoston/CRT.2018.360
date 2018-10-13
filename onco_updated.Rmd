@@ -1,0 +1,379 @@
+---
+title: Trends in patient characteristics and outcomes of cancer patients admitted
+  to the ICU of a tertiary teaching hospital in the U.S.
+author: "Christopher M. Sauer"
+date: "May 07, 2018"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+editor_options:
+  chunk_output_type: inline
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(sjmisc)
+library(plyr)
+library(Hmisc)
+library(epitools)
+library(sjPlot)
+library(MIMICbook)
+library(devtools)
+library(dplyr)
+library(ggplot2)
+library(tableone)
+library(MASS)
+
+setwd("C:/Users/chris/OneDrive/MPH/ICU- Trends survival cancer/Newest dataset")
+onco = read.table("dataset_trend_cancer_clinical_processed.txt", sep="\t", header=TRUE) 
+angus= read.table("dataset_angus_sepsis_clinical.txt")
+colnames(angus)=c("SUBJECT_ID" , "HADM_ID" , "ICUSTAY_ID", "SEPSIS")
+
+onco2 <- onco %>% group_by(SUBJECT_ID , HADM_ID , ICUSTAY_ID , AGE_ADMISSION , GENDER, RACE, MARITAL_STATUS, ELIXHAUSER_VANWALRAVEN, ELIXHAUSER_SID29, ELIXHAUSER_SID30, VASOPRESSORS_DURATION_MINUTES, VENTILATION_DURATION_MINUTES, OASIS_SCORE, APSIII_SCORE,ICU_TYPE ,RRT ,DNR_ADMISSION, DNR_ANY, CMO_ADMISSION, CMO_ANY, SOFA_SCORE ,SAPS_SCORE ,MORTALITY_ICU, MORTALITY_TIME, LOS_ICU ,LOS_HOSPITAL ,SOLID_TUMOR ,METASTATIC_CANCER, LYMPHOMA) %>% summarise(ORALMAL = sum(ORALMAL), GIMAL = sum(GIMAL), RESPMAL=sum(RESPMAL), CONNMAL = sum(CONNMAL), GUMAL = sum(GUMAL), OTHERMAL = sum(OTHERMAL), TRUELYMPHOMA=sum(TRUELYMPHOMA), OTHERHEMMAL=sum(OTHERHEMMAL), LEUKEMIA=sum(LEUKEMIA))
+
+load (file= "records_groups.RData")
+comb<-merge(x=onco2,y=records_groups,fix.by=c("SUBJECT_ID_x", "HADM_ID_x",all.x=TRUE))
+
+reason= read.csv("reason admission.csv")
+comb <-left_join(comb, reason, by=c("SUBJECT_ID", "HADM_ID"))
+
+comb <- comb[comb$GROUP>=2,]
+comb <- comb[comb$GROUP<=11,]
+comb$GROUP<-comb$GROUP+2000
+
+comb <- comb %>%  mutate(OTHERMAL = ifelse(OTHERMAL >= 1, "Yes", ifelse (OTHERMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(GIMAL = ifelse(GIMAL >= 1, "Yes", ifelse (GIMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(RESPMAL = ifelse(RESPMAL >= 1, "Yes", ifelse (RESPMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(CONNMAL = ifelse(CONNMAL >= 1, "Yes", ifelse (CONNMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(GUMAL = ifelse(GUMAL >= 1, "Yes", ifelse (GUMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(ORALMAL = ifelse(ORALMAL >= 1, "Yes", ifelse (ORALMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(TRUELYMPHOMA = ifelse(TRUELYMPHOMA >= 1, "Yes", ifelse (TRUELYMPHOMA == 0, "No", NA)))
+comb <- comb %>%  mutate(OTHERHEMMAL = ifelse(OTHERHEMMAL >= 1, "Yes", ifelse (OTHERHEMMAL == 0, "No", NA)))
+comb <- comb %>%  mutate(LEUKEMIA = ifelse(LEUKEMIA >= 1, "Yes", ifelse (LEUKEMIA == 0, "No", NA)))
+comb <- comb %>%  mutate(OTHERMAL = ifelse(OTHERMAL== "Yes" & GIMAL=="No" & RESPMAL=="No" & CONNMAL=="No" &GUMAL=="No" &ORALMAL=="No", "Yes", "No"))
+comb <- comb %>%  mutate(OTHERHEMMAL = ifelse(OTHERHEMMAL== "Yes" & LEUKEMIA=="No" & TRUELYMPHOMA=="No", "Yes", "No"))
+
+comb <- comb %>%  mutate(race2= ifelse(comb$RACE == "WHITE" | comb$RACE== "WHITE - RUSSIAN" | comb$RACE == "WHITE - EASTERN EUROPEAN", "White", "Non-White"))
+
+comb <- comb %>%  mutate(m28.flg = ifelse(is.na(MORTALITY_TIME), "0",
+                                          ifelse(MORTALITY_TIME<= 28, "1", "0")))
+comb <- comb %>%  mutate(m1y.flg = ifelse(is.na(MORTALITY_TIME), "0",
+                                      ifelse(MORTALITY_TIME<= 365, "1", "0")))
+
+comb$VASOPRESSORS_DURATION_MINUTES<- as.numeric(comb$VASOPRESSORS_DURATION_MINUTES)
+comb <- comb %>%  mutate(vaso.flg = ifelse(is.na(VASOPRESSORS_DURATION_MINUTES), "0", 
+                                           ifelse(VASOPRESSORS_DURATION_MINUTES>= -999, "1", "0")))
+
+
+comb$VENTILATION_DURATION_MINUTES<- as.numeric(comb$VENTILATION_DURATION_MINUTES)
+comb <- comb %>%  mutate(vent.flg = ifelse(is.na(VENTILATION_DURATION_MINUTES), "0", 
+                                           ifelse(VENTILATION_DURATION_MINUTES>= -999, "1", "0")))
+
+comb <- comb %>%  mutate(onc.flg= ifelse(comb$GUMAL== "Yes" | comb$GIMAL== "Yes" | comb$RESPMAL== "Yes" | comb$CONNMAL== "Yes" | comb$OTHERMAL== "Yes" | comb$ORALMAL== "Yes", "1", "0"))
+comb <- comb %>%  mutate(hem.flg= ifelse(comb$TRUELYMPHOMA== "Yes" | comb$LEUKEMIA== "Yes" | comb$OTHERHEMMAL== "Yes", "1", "0"))
+comb <- comb %>%  mutate(mal.flg= ifelse(hem.flg=="1"| onc.flg =="1", "1","0"))
+
+comb <- comb %>%  mutate(sofa.cut = ifelse(SOFA_SCORE <= 5, "low", ifelse (SOFA_SCORE >= 11, "high", "moderate")))
+
+comb <- comb %>% mutate(cancertype = ifelse(GIMAL == "Yes", "GI", ifelse(TRUELYMPHOMA == "Yes", "LYMPHOMA", ifelse(LEUKEMIA == "Yes", "LEUKEMIA", ifelse(OTHERHEMMAL == "Yes", "OTHER HEMATOLOGIC", ifelse(OTHERMAL == "Yes", "OTHER", ifelse(ORALMAL == "Yes", "ORAL", ifelse(RESPMAL == "Yes", "RESPIRATORY", ifelse(CONNMAL == "Yes", "CONNECTIVE TISSUE", ifelse(GUMAL == "Yes", "GU", NA ))))))))))
+
+comb <- comb %>% mutate(cancertype2 = ifelse(GIMAL == "Yes", "GI", ifelse(TRUELYMPHOMA == "Yes", "LYMPHOMA", ifelse(LEUKEMIA == "Yes", "LEUKEMIA", ifelse(OTHERHEMMAL == "Yes", "OTHER HEMATOLOGIC", ifelse(OTHERMAL == "Yes", "OTHER", ifelse(ORALMAL == "Yes", "ORAL", ifelse(RESPMAL == "Yes", "RESPIRATORY", ifelse(CONNMAL == "Yes", "CONNECTIVE TISSUE", ifelse(GUMAL == "Yes", "GU", "No cancer" ))))))))))
+
+
+comb <- comb %>% mutate(typeonc = ifelse(GIMAL == "Yes", "GI", ifelse(ORALMAL == "Yes", "ORAL", ifelse(RESPMAL == "Yes", "RESPIRATORY", ifelse(CONNMAL == "Yes", "CONNECTIVE TISSUE", ifelse(GUMAL == "Yes", "GU", ifelse(OTHERMAL == "Yes", "OTHER", NA )))))))
+
+comb <- comb %>% mutate(typehem = ifelse(TRUELYMPHOMA == "Yes", "LYMPHOMA", ifelse(LEUKEMIA == "Yes", "LEUKEMIA", ifelse(OTHERHEMMAL == "Yes", "OTHER", NA))))
+
+comb <- comb %>%  mutate(hem_onc = ifelse(hem.flg == "1", "Hematologic", ifelse (onc.flg == "1", "Solid", "No cancer")))
+
+comb <- comb %>% mutate(METASTATIC_CANCER = ifelse(onc.flg == "1" & METASTATIC_CANCER==1, 1, 0))
+
+comb$LYMPHOMA<- as.factor(comb$LYMPHOMA)
+comb$SOLID_TUMOR<- as.factor(comb$SOLID_TUMOR)
+comb$m28.flg<-as.factor(comb$m28.flg)
+comb$m1y.flg<-as.factor(comb$m1y.flg)
+comb$METASTATIC_CANCER<- as.factor(comb$METASTATIC_CANCER)
+comb$mal.flg<-as.factor(comb$mal.flg)
+comb$RRT<-as.factor(comb$RRT)
+comb$DNR_ADMISSION<-as.factor(comb$DNR_ADMISSION)
+comb$CMO_ADMISSION<-as.factor(comb$CMO_ADMISSION)
+comb$vaso.flg<-as.factor(comb$vaso.flg)
+comb$vent.flg<-as.factor(comb$vent.flg)
+
+comb<-merge(x=comb,y=angus)
+comb$SEPSIS<-as.factor(comb$SEPSIS)
+
+cancer <- comb
+cancer = cancer[which(as.character(cancer[,"mal.flg"])=="1"),]
+onc= cancer[which(as.character(cancer[,"onc.flg"])=="1"),]
+hem= cancer[which(as.character(cancer[,"hem.flg"])=="1"),]
+noncancer=comb[which(as.character(comb[,"mal.flg"])=="0"),]
+```
+
+```{r echo=FALSE}
+set_theme(theme_light())
+
+comb$hem_onc <- factor(comb$hem_onc, 
+        levels = c("Hematologic", "Solid", "No cancer"),
+        labels = c("Hematologic malignancy", "Solid cancer", "No cancer")        
+        )
+tiff(filename = "Rplot%03d.tif",
+     width = 800, height = 480, units = "px", pointsize = 18,
+     compression = c("none", "rle", "lzw", "jpeg", "zip", "lzw+p", "zip+p"),
+     bg = "white", res = NA, family = "", restoreConsole = TRUE,
+     type = c("windows", "cairo"))
+ggplot(comb,aes(x = GROUP, fill = hem_onc), geom.outline.size = 0, geom.label.size = 4, geom.outline.color=1)+  geom_bar(position = "fill", show.legend = T)+ labs(title="Cancer Patients as a Proportion of Overall Admissions", x="Year of admission", y="Proportion of patients")
+```
+
+```{r}
+cancer$cancertype2 <- factor(cancer$cancertype2, 
+        levels = c("CONNECTIVE TISSUE", "GI", "GU", "ORAL", "RESPIRATORY", "OTHER", "LEUKEMIA", "LYMPHOMA", "OTHER HEMATOLOGIC"),
+        labels = c("Connective tissue", "Gastrointestinal", "Genitourinary", "Oral", "Respiratory", "Other solid cancer", "Leukemia", "Lymphoma", "Other hematologic malignancy")        
+        )
+
+comb$cancertype2 <- factor(comb$cancertype2, 
+        levels = c("CONNECTIVE TISSUE", "GI", "GU", "ORAL", "RESPIRATORY", "OTHER", "LEUKEMIA", "LYMPHOMA", "OTHER HEMATOLOGIC", "No cancer"),
+        labels = c("Connective tissue", "Gastrointestinal", "Genitourinary", "Oral", "Respiratory", "Other solid cancer", "Leukemia", "Lymphoma", "Other hematologic malignancy", "No cancer")        
+        )
+
+tiff(filename = "Rplot%03d.tif",
+     width = 900, height = 480, units = "px", pointsize = 12,
+     compression = c("none", "rle", "lzw", "jpeg", "zip", "lzw+p", "zip+p"),
+     bg = "white", res = NA, family = "", restoreConsole = TRUE,
+     type = c("windows", "cairo"))
+ggplot(cancer,aes(x = GROUP, fill = cancertype2))+  geom_bar(position = "fill", show.legend = T)+ labs(title="Trends in admission of cancer patients by subtype", x="Year of admission", y="Proportion of patients")
+
+```
+
+```{r}
+set_theme(geom.outline.color = "antiquewhite4", 
+             geom.outline.size = 5, 
+             geom.label.size = 4.5,
+             geom.label.color = "grey50",
+              panel.gridcol.x =  "white",
+             title.color = "black", 
+             title.size = 1.5, 
+             axis.angle.x = 0, 
+             axis.textcolor = "black", 
+             base = theme_bw() )
+
+```
+
+
+
+```{r, message= FALSE}
+plot_prop_by_level(comb, "GROUP", "m28.flg", factor.var2="hem_onc", ylab= "28-Days Mortality")
+plot_prop_by_level(comb, "GROUP", "m1y.flg", factor.var2="hem_onc", ylab= "1-Year Mortality")
+
+
+plot_prop_by_level(comb, "GROUP", "APSIII_SCORE",factor.var2="mal.flg", ylab="APACHE III Score")
+
+plot_prop_by_level(comb, "GROUP", "OASIS_SCORE",factor.var2="mal.flg", ylab="OASIS Score")
+
+```
+
+#Curde odds ratios mortality
+```{r}
+table(comb$hem_onc, comb$m28.flg)
+oddsratio(comb$hem_onc, comb$m1y.flg)
+oddsratio(comb$SOLID_TUMOR, comb$m1y.flg)
+oddsratio(comb$LYMPHOMA, comb$m1y.flg)
+oddsratio(comb$METASTATIC_CANCER, comb$m1y.flg)
+oddsratio(comb$GROUP, comb$m1y.flg)
+```
+
+
+
+#Crude odds ratio 28-day mortality in the presence and absence of a malignancy
+
+```{r, echo = FALSE}
+oddsratio(comb$hem.flg, comb$m1y.flg)
+```
+
+# Prognosis by SOFA scores
+
+```{r}
+plot_prop_by_level(comb, "cancertype2", "m28.flg",factor.var2="sofa.cut", ylab="Proportion dying within 28 days")
+plot_prop_by_level(comb, "cancertype2", "m1y.flg",factor.var2="sofa.cut", ylab="Proportion dying within 1 year")
+table(comb$sofa.cut, comb$cancertype)
+
+```
+
+# 28d/ 1yr mortality
+
+```{r}
+tiff(filename = "Rplot%03d.tif",
+     width = 1000, height = 480, units = "px", pointsize = 12,
+     compression = c("none", "rle", "lzw", "jpeg", "zip", "lzw+p", "zip+p"),
+     bg = "white", res = NA, family = "", restoreConsole = TRUE,
+     type = c("windows", "cairo"))
+plot_prop_by_level(comb, "cancertype2", "m28.flg",factor.var2="GROUP", ylab="Proportion dying within 28 days")
+par(mfrow = c(1,1))
+
+tiff(filename = "Rplot%03d.tif",
+     width = 1000, height = 480, units = "px", pointsize = 12,
+     compression = c("none", "rle", "lzw", "jpeg", "zip", "lzw+p", "zip+p"),
+     bg = "white", res = NA, family = "", restoreConsole = TRUE,
+     type = c("windows", "cairo"))
+plot_prop_by_level(comb, "cancertype2", "m1y.flg",factor.var2="GROUP", ylab="Proportion dying within 1 year")
+par(mfrow = c(1,1))
+```
+
+
+# 28d/ 1yr mortality by cancer type
+```{r}
+plot_prop_by_level(comb, "typeonc", "m28.flg",factor.var2="GROUP", ylab="Proportion dying within 28 days")
+plot_prop_by_level(comb, "typeonc", "m1y.flg",factor.var2="GROUP", ylab="Proportion dying within 1 year")
+
+
+table(comb$typeonc, comb$m28.flg)
+```
+# 28d/ 1yr mortality by hematologic type
+```{r}
+plot_prop_by_level(comb, "typehem", "m28.flg",factor.var2="GROUP", ylab="Proportion dying within 28 days")
+plot_prop_by_level(comb, "typehem", "m1y.flg",factor.var2="GROUP", ylab="Proportion dying within 1 year")
+```
+
+
+## Table 1
+#Overview of patient characteristics stratified by the presence of a hematological and oncological malignancy. 
+Yes:No = only hematologic malignancy
+No:Yes = only solid tumor
+Yes:Yes = both solid and hematologic malignancy
+
+```{r}
+CreateTableOne(vars=c("ADMISSION_TYPE","SEPSIS", "CMO_ADMISSION","DNR_ADMISSION","METASTATIC_CANCER","AGE_ADMISSION", "race2", "LOS_ICU", "LOS_HOSPITAL", "vent.flg", "vaso.flg", "RRT", "ELIXHAUSER_SID30","SOFA_SCORE","APSIII_SCORE","m28.flg","m1y.flg" ),strata=c("hem.flg", "onc.flg") ,data= comb,test=F) %>% print(
+  printToggle      = FALSE,
+  showAllLevels    = TRUE,
+  cramVars         = "kon"
+) %>% 
+{data.frame(
+  variable_name             = gsub(" ", "&nbsp;", rownames(.), fixed = TRUE), ., 
+  row.names        = NULL, 
+  check.names      = FALSE, 
+  stringsAsFactors = FALSE)} %>% 
+knitr::kable()
+```
+
+#Alternative: Stratified by year of admission- CANCER PATIENTS ONLY!!!
+```{r}
+CreateTableOne(vars=c("AGE_ADMISSION","SEPSIS","DNR_ADMISSION","race2","vaso.flg","vent.flg", "typeonc", "typehem","METASTATIC_CANCER","RRT", "ELIXHAUSER_SID30" ,"SOFA_SCORE","APSIII_SCORE","OASIS_SCORE", "LOS_ICU", "LOS_HOSPITAL", "m28.flg","m1y.flg") ,strata="GROUP",data=cancer,test=F) %>% print(
+  printToggle      = FALSE,
+  showAllLevels    = TRUE,
+  cramVars         = "kon"
+) %>% 
+{data.frame(
+  variable_name             = gsub(" ", "&nbsp;", rownames(.), fixed = TRUE), ., 
+  row.names        = NULL, 
+  check.names      = FALSE, 
+  stringsAsFactors = FALSE)} %>% 
+knitr::kable()
+```
+
+
+#Odds ratio of 28d (fig.1) and 1-year mortality (fig.2) by year of admission. 2002=baseline
+
+```{r, echo= FALSE}
+plot_OR_by_level(comb, "hem_onc", "m28.flg",factor.var2="GROUP", include.ref.group.effect = TRUE)
+plot_OR_by_level(comb, "hem_onc", "m1y.flg",factor.var2="GROUP", include.ref.group.effect = TRUE)
+```
+
+#Trends in mortality between 2002-2011 for patients with solid malignancies
+
+```{r, echo = FALSE}
+plot_prop_by_level(comb, "onc.flg", "m1y.flg",factor.var2="GROUP", ylab="1-year mortality")
+plot_prop_by_level(comb, "onc.flg", "m28.flg",factor.var2="GROUP", ylab="28-day mortality")
+```
+
+#Odds ratio of 28d (fig.1) and 1-year mortality (fig.2) by year of admission
+
+```{r, echo= FALSE}
+plot_OR_by_level(comb, "onc.flg", "m28.flg",factor.var2="GROUP", ylab="28-day mortality")
+plot_OR_by_level(comb, "onc.flg", "m1y.flg",factor.var2="GROUP", ylab="1-year mortality")
+```
+
+#Trends in mortality between 2002-2011 for patients with hematologic malignancies
+```{r, echo= FALSE}
+plot_prop_by_level(comb, "hem.flg", "m1y.flg",factor.var2="GROUP", ylab="1-year mortality")
+plot_prop_by_level(comb, "hem.flg", "m28.flg",factor.var2="GROUP", ylab="28-day mortality")
+plot_prop_by_level(comb, "cancertype", "m28.flg",factor.var2="GROUP", ylab="28-day mortality")
+```
+
+#Odds ratio of 28d (fig.1) and 1-year mortality (fig.2) by year of admission
+
+```{r, echo= FALSE}
+plot_OR_by_level(comb, "hem.flg", "m28.flg",factor.var2="GROUP")
+plot_OR_by_level(comb, "hem.flg", "m1y.flg",factor.var2="GROUP")
+```
+
+# Logistic regression model, outcome=28day mortality 
+
+```{r, echo = FALSE}
+m28.glm <- glm(m28.flg ~ onc.flg + GROUP + vent.flg+ vaso.flg+ APSIII_SCORE + AGE_ADMISSION + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER, data=comb, family="binomial")
+exp(m28.glm$coefficients)
+exp(confint(m28.glm))
+sjp.glm(m28.glm, show.values = TRUE, vline.type = 1, grid.breaks = 100)
+
+```
+
+# Logistic regression model, outcome=28day mortality , cancer patients only
+
+```{r, echo = FALSE}
+m28c.glm <- glm(m28.flg ~  GROUP + vent.flg+ AGE_ADMISSION+vaso.flg+ APSIII_SCORE + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER+typeonc, data=onc, family="binomial")
+AIC(m28c.glm)
+exp(m28c.glm$coefficients)
+exp(confint(m28c.glm))
+plot_model(m28c.glm, show.values = TRUE,  title = "28-day Mortality Solid Malignancies", sort.est = T, axis.lim = c(0.3,5))
+
+m28h.glm <- glm(m28.flg ~  GROUP + vent.flg+ vaso.flg+ AGE_ADMISSION+ APSIII_SCORE + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER+typehem, data=hem, family="binomial")
+(exp(m28h.glm$coefficients))
+round(exp(confint(m28h.glm)), digits = 2)
+plot_model(m28h.glm, show.values = TRUE, title = "28-day Mortality Hematologic Malignancies", show.p = T, sort.est = T, axis.lim = c(0.02,20))
+
+```
+
+
+# Logistic regression model, outcome=1 year mortality 
+
+
+```{r, echo = FALSE}
+comb$m1y.flg<- as.factor(comb$m1y.flg)
+m1y.glm <- glm(m1y.flg ~ mal.flg +GROUP + vent.flg+ vaso.flg+ APSIII_SCORE + AGE_ADMISSION + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER,data=comb, family="binomial")
+summary(m1y.glm)
+exp(confint(m1y.glm))
+sjp.glm(m1y.glm, show.values = TRUE, vline.type = 1)
+```
+
+# Logistic regression model, outcome=1 year mortality , cancer patients only
+
+
+```{r, echo = FALSE}
+comb$m1y.flg<- as.factor(comb$m1y.flg)
+m1yh.glm <- glm(m1y.flg ~  GROUP + vent.flg+ AGE_ADMISSION+vaso.flg+ APSIII_SCORE + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER+ typehem,data=hem, family="binomial")
+summary.glm(m1yh.glm)
+exp(confint(m1yh.glm))
+plot_model(m1yh.glm, show.values = TRUE, vline.type = 1, title = "1-year Mortality Hematologic Malignancies", show.p = T, sort.est = T,  axis.lim = c(0.05, 10))
+
+m1ys.glm <- glm(m1y.flg ~  GROUP + vent.flg+ AGE_ADMISSION+ vaso.flg+ APSIII_SCORE + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER+ typeonc,data=onc, family="binomial")
+summary.glm(m1ys.glm)
+exp(confint(m1ys.glm))
+plot_model(m1ys.glm, show.values = TRUE, vline.type = 1, title = "1-year Mortality Solid Malignancies", show.p = T, sort.est = T, axis.lim = c(0.1,10))
+```
+
+
+```{r}
+table(comb$cancertype2)
+subset=comb[comb$METASTATIC_CANCER==1,]
+m28.glm <- glm(m28.flg ~ GROUP + vent.flg+ vaso.flg+ APSIII_SCORE + AGE_ADMISSION + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER, data=subset, family="binomial")
+exp(m28.glm$coefficients)
+exp(confint(m28.glm))
+m1ysub.glm <- glm(m1y.flg ~ GROUP + vent.flg+ vaso.flg+ APSIII_SCORE + AGE_ADMISSION + race2 +  ELIXHAUSER_SID30 + DNR_ADMISSION+ ICU_TYPE+ GENDER, data=subset, family="binomial")
+exp(m1ysub.glm$coefficients)
+exp(confint(m1ysub.glm))
+```
+
+
+
+
